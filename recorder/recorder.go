@@ -34,6 +34,15 @@ type Recorder struct {
 	buffer []int32
 }
 
+func NewDefaultRecorderConfig() *RecorderConfig {
+	return &RecorderConfig{
+		SampleRate:      22050,
+		InputChannels:   1,
+		FramesPerBuffer: 64,
+		MaxTime:         100000,
+	}
+}
+
 func NewRecorder(cfg *RecorderConfig) (*Recorder, error) {
 	if cfg == nil {
 		return nil, ErrInvalidRecorderConfig

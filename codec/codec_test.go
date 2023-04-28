@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// middle c
 func getTestData(seconds int) []int32 {
 	amplitude := float64(1<<31 - 1)
 	freq := 261.63
