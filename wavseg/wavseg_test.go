@@ -1,11 +1,14 @@
-package codec
+package wavseg
 
 import (
 	"bytes"
-	"log"
+	"fmt"
 	"math"
 	"os"
 	"testing"
+
+	"github.com/garlicgarrison/go-recorder/codec"
+	"github.com/stretchr/testify/assert"
 )
 
 // middle c
@@ -37,36 +40,47 @@ func getTestDataSilence(seconds int) []int32 {
 	return testData
 }
 
-func TestEncodeDecodeWAV(t *testing.T) {
+func TestWavSeg(t *testing.T) {
 	waves := getTestData(2)
 	waves = append(waves, getTestDataSilence(1)...)
 	waves = append(waves, getTestData(2)...)
 
-	wav := NewDefaultWAV(waves)
+	wav := codec.NewDefaultWAV(waves)
 	b, err := wav.EncodeWAV()
 	if err != nil {
 		t.Fatalf("encoding error - %s", err)
 	}
 
-	f, err := os.Create("tests/wav_test.wav")
-	if err != nil {
-		t.Fatalf("file creation error - %s", err)
-	}
-	defer f.Close()
+	buffers := WavSeg(b)
+	assert.Equal(t, len(buffers), 2)
+	for i := range buffers {
+		f, err := os.Create(fmt.Sprintf("tests/wav_test_%d.wav", i))
+		if err != nil {
+			t.Fatalf("file creation error - %s", err)
+		}
+		defer f.Close()
 
-	_, err = f.Write(b.Bytes())
-	if err != nil {
-		t.Fatalf("write error - %s", err)
+		_, err = f.Write(buffers[i].Bytes())
+		if err != nil {
+			t.Fatalf("write error - %s", err)
+		}
 	}
 
-	wavBytes, err := os.ReadFile("tests/wav_test.wav")
+	wavBytes, err := os.ReadFile("tests/me.wav")
 	if err != nil {
 		t.Fatalf("read error -- %s", err)
 	}
+	buffers = WavSeg(bytes.NewBuffer(wavBytes))
+	for i := range buffers {
+		f, err := os.Create(fmt.Sprintf("tests/me_test_%d.wav", i))
+		if err != nil {
+			t.Fatalf("file creation error - %s", err)
+		}
+		defer f.Close()
 
-	log.Printf("len %d", len(wavBytes))
-	err = wav.DecodeWAV(bytes.NewBuffer(wavBytes))
-	if err != nil {
-		t.Fatalf("decode error -- %s", err)
+		_, err = f.Write(buffers[i].Bytes())
+		if err != nil {
+			t.Fatalf("write error - %s", err)
+		}
 	}
 }

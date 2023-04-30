@@ -12,9 +12,6 @@ var (
 	ErrInvalidWAV = errors.New("invalid wav file")
 )
 
-type Codec struct {
-}
-
 type WAVHeader struct {
 	RIFF          [4]byte // "RIFF"
 	TotalSize     uint32  // Total file size DEFAULT: 36 + 4*numSamples
@@ -57,78 +54,78 @@ func NewDefaultWAV(stream []int32) *WAVFile {
 	}
 }
 
-func (c *Codec) EncodeWAV(wav *WAVFile) (*bytes.Buffer, error) {
+func (f *WAVFile) EncodeWAV() (*bytes.Buffer, error) {
 	var buf bytes.Buffer
 	w := bufio.NewWriter(&buf)
 
 	// format
-	err := binary.Write(w, binary.LittleEndian, wav.Header.RIFF)
+	err := binary.Write(w, binary.LittleEndian, f.Header.RIFF)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.TotalSize) //total size
+	err = binary.Write(w, binary.LittleEndian, f.Header.TotalSize) //total size
 	if err != nil {
 		return nil, err
 	}
 
 	// wave declaration
-	err = binary.Write(w, binary.LittleEndian, wav.Header.Format)
+	err = binary.Write(w, binary.LittleEndian, f.Header.Format)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.FMT)
+	err = binary.Write(w, binary.LittleEndian, f.Header.FMT)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.ChunkSize) //chunk size
+	err = binary.Write(w, binary.LittleEndian, f.Header.ChunkSize) //chunk size
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.AudioFormat) //format tag
+	err = binary.Write(w, binary.LittleEndian, f.Header.AudioFormat) //format tag
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.NumChannels)
+	err = binary.Write(w, binary.LittleEndian, f.Header.NumChannels)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.SampleRate)
+	err = binary.Write(w, binary.LittleEndian, f.Header.SampleRate)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.ByteRate)
+	err = binary.Write(w, binary.LittleEndian, f.Header.ByteRate)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.BlockAlign) //bytes per sample
+	err = binary.Write(w, binary.LittleEndian, f.Header.BlockAlign) //bytes per sample
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.Header.BitsPerSample) //bits per sample
+	err = binary.Write(w, binary.LittleEndian, f.Header.BitsPerSample) //bits per sample
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, wav.DataHeader)
+	err = binary.Write(w, binary.LittleEndian, f.DataHeader)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.LittleEndian, int32(wav.Header.TotalSize-36))
+	err = binary.Write(w, binary.LittleEndian, int32(f.Header.TotalSize-36))
 	if err != nil {
 		return nil, err
 	}
 
-	err = c.writeRawAudio(w, false, wav.Data)
+	err = writeRawAudio(w, false, f.Data)
 	if err != nil {
 		return nil, err
 	}
@@ -141,52 +138,48 @@ func (c *Codec) EncodeWAV(wav *WAVFile) (*bytes.Buffer, error) {
 	return &buf, nil
 }
 
-func (c *Codec) DecodeWAV(buf *bytes.Buffer) (*WAVFile, error) {
-	var header WAVHeader
-
+func (f *WAVFile) DecodeWAV(buf *bytes.Buffer) error {
 	// read WAV header fields
-	err := binary.Read(buf, binary.LittleEndian, &header)
+	err := binary.Read(buf, binary.LittleEndian, &f.Header)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// check if file format is supported
-	if string(header.RIFF[:]) != "RIFF" || string(header.Format[:]) != "WAVE" || string(header.FMT[:]) != "fmt " || header.AudioFormat != 1 {
-		return nil, ErrInvalidWAV
+	if string(f.Header.RIFF[:]) != "RIFF" || string(f.Header.Format[:]) != "WAVE" || string(f.Header.FMT[:]) != "fmt " || f.Header.AudioFormat != 1 {
+		return ErrInvalidWAV
 	}
 
 	// skips any extra bytes in the format subchunk
-	if header.ChunkSize > 16 {
-		_, err = io.CopyN(io.Discard, buf, int64(header.ChunkSize-16))
+	if f.Header.ChunkSize > 16 {
+		_, err = io.CopyN(io.Discard, buf, int64(f.Header.ChunkSize-16))
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
 	var dataHeader [4]byte
 	err = binary.Read(buf, binary.LittleEndian, &dataHeader)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	f.DataHeader = dataHeader
 
 	var dataSize uint32
 	err = binary.Read(buf, binary.LittleEndian, &dataSize)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	f.DataBytes = dataSize
 
-	data := make([]int32, (header.TotalSize-36)/4)
+	data := make([]int32, (f.Header.TotalSize-36)/4)
 	err = binary.Read(buf, binary.LittleEndian, &data)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	f.Data = data
 
-	return &WAVFile{
-		Header:     header,
-		DataHeader: dataHeader,
-		DataBytes:  dataSize,
-		Data:       data,
-	}, nil
+	return nil
 }
 
 type AIFFHeader struct {
@@ -231,80 +224,80 @@ func NewDefaultAIFF(stream []int32) *AIFFFile {
 	}
 }
 
-func (c *Codec) EncodeAIFF(aiff *AIFFFile) (*bytes.Buffer, error) {
+func (f *AIFFFile) EncodeAIFF() (*bytes.Buffer, error) {
 	var buf bytes.Buffer
 	w := bufio.NewWriter(&buf)
 
 	// format
-	err := binary.Write(w, binary.BigEndian, aiff.Header.FORM)
+	err := binary.Write(w, binary.BigEndian, f.Header.FORM)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, aiff.Header.TotalSize)
+	err = binary.Write(w, binary.BigEndian, f.Header.TotalSize)
 	if err != nil {
 		return nil, err
 	}
 
 	// aiff declaration
-	err = binary.Write(w, binary.BigEndian, aiff.Header.FormType)
+	err = binary.Write(w, binary.BigEndian, f.Header.FormType)
 	if err != nil {
 		return nil, err
 	}
 
 	// comm
-	err = binary.Write(w, binary.BigEndian, aiff.Header.AudioFormat)
+	err = binary.Write(w, binary.BigEndian, f.Header.AudioFormat)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, aiff.Header.ChunkSize) //size
+	err = binary.Write(w, binary.BigEndian, f.Header.ChunkSize) //size
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, aiff.Header.NumChannels) //channels
+	err = binary.Write(w, binary.BigEndian, f.Header.NumChannels) //channels
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, aiff.Header.NumSamples) //samples
+	err = binary.Write(w, binary.BigEndian, f.Header.NumSamples) //samples
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, aiff.Header.BitsPerSample) //bits per sample
+	err = binary.Write(w, binary.BigEndian, f.Header.BitsPerSample) //bits per sample
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = w.Write([]byte{0x40, 0x0e, byte(int(aiff.Header.SampleRate) >> 8), byte(int(aiff.Header.SampleRate) & 0xFF), 0, 0, 0, 0, 0, 0}) //80-bits 44100 sample rate
+	_, err = w.Write([]byte{0x40, 0x0e, byte(int(f.Header.SampleRate) >> 8), byte(int(f.Header.SampleRate) & 0xFF), 0, 0, 0, 0, 0, 0}) //80-bits 44100 sample rate
 	if err != nil {
 		return nil, err
 	}
 
 	// sound chunk
-	err = binary.Write(w, binary.BigEndian, aiff.Header.SSND)
+	err = binary.Write(w, binary.BigEndian, f.Header.SSND)
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, aiff.Header.SoundChunkSize) //size
+	err = binary.Write(w, binary.BigEndian, f.Header.SoundChunkSize) //size
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, aiff.Header.Offset) //offset
+	err = binary.Write(w, binary.BigEndian, f.Header.Offset) //offset
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, aiff.Header.Block) //block
+	err = binary.Write(w, binary.BigEndian, f.Header.Block) //block
 	if err != nil {
 		return nil, err
 	}
 
-	err = c.writeRawAudio(w, true, aiff.Data)
+	err = writeRawAudio(w, true, f.Data)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +310,7 @@ func (c *Codec) EncodeAIFF(aiff *AIFFFile) (*bytes.Buffer, error) {
 	return &buf, nil
 }
 
-func (c *Codec) writeRawAudio(w *bufio.Writer, endian bool, fullStream []int32) error {
+func writeRawAudio(w *bufio.Writer, endian bool, fullStream []int32) error {
 	for _, frame := range fullStream {
 		var err error
 		if endian {

@@ -69,31 +69,31 @@ func (v *VAD) RegisterListener(listener VADListener) {
 	v.listeners = append(v.listeners, listener)
 }
 
-func (v *VAD) Start() error {
-	stream, err := v.initAudio()
-	if err != nil {
-		return err
-	}
-	defer v.closeAudio(stream)
-
-	v.running = true
-	for {
-		quit := false
-		select {
-		case <-v.pauseCh:
-			<-v.resumeCh
-		case <-v.quitCh:
-			quit = true
-		default:
-			v.detect(stream)
+func (v *VAD) Start() {
+	go func() {
+		stream, err := v.initAudio()
+		if err != nil {
+			return
 		}
+		defer v.closeAudio(stream)
 
-		if quit {
-			break
+		v.running = true
+		for {
+			quit := false
+			select {
+			case <-v.pauseCh:
+				<-v.resumeCh
+			case <-v.quitCh:
+				quit = true
+			default:
+				v.detect(stream)
+			}
+
+			if quit {
+				break
+			}
 		}
-	}
-
-	return nil
+	}()
 }
 
 func (v *VAD) Pause() {

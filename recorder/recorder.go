@@ -30,7 +30,6 @@ type RecorderConfig struct {
 
 type Recorder struct {
 	cfg    *RecorderConfig
-	codec  *codec.Codec
 	buffer []int32
 }
 
@@ -50,7 +49,6 @@ func NewRecorder(cfg *RecorderConfig) (*Recorder, error) {
 
 	return &Recorder{
 		cfg:    cfg,
-		codec:  &codec.Codec{},
 		buffer: make([]int32, cfg.FramesPerBuffer),
 	}, nil
 }
@@ -105,9 +103,9 @@ func (r *Recorder) Record(format Format, quit chan os.Signal) (*bytes.Buffer, er
 
 			switch format {
 			case AIFF:
-				return r.codec.EncodeAIFF(codec.NewDefaultAIFF(fullStream))
+				return codec.NewDefaultAIFF(fullStream).EncodeAIFF()
 			case WAV:
-				return r.codec.EncodeWAV(codec.NewDefaultWAV(fullStream))
+				return codec.NewDefaultWAV(fullStream).EncodeWAV()
 			}
 		case <-timerChan:
 			if err = stream.Stop(); err != nil {
@@ -116,9 +114,9 @@ func (r *Recorder) Record(format Format, quit chan os.Signal) (*bytes.Buffer, er
 
 			switch format {
 			case AIFF:
-				return r.codec.EncodeAIFF(codec.NewDefaultAIFF(fullStream))
+				return codec.NewDefaultAIFF(fullStream).EncodeAIFF()
 			case WAV:
-				return r.codec.EncodeWAV(codec.NewDefaultWAV(fullStream))
+				return codec.NewDefaultWAV(fullStream).EncodeWAV()
 			}
 		default:
 		}
