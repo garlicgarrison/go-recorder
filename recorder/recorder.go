@@ -3,7 +3,6 @@ package recorder
 import (
 	"bytes"
 	"errors"
-	"os"
 	"time"
 
 	"github.com/garlicgarrison/go-recorder/codec"
@@ -53,7 +52,7 @@ func NewRecorder(cfg *RecorderConfig) (*Recorder, error) {
 	}, nil
 }
 
-func (r *Recorder) Record(format Format, quit chan os.Signal) (*bytes.Buffer, error) {
+func (r *Recorder) Record(format Format, quit chan bool) (*bytes.Buffer, error) {
 	timerChan := make(chan bool)
 	go func() {
 		time.Sleep(time.Millisecond * time.Duration(r.cfg.MaxTime))
