@@ -2,26 +2,34 @@ package vad
 
 import (
 	"math"
-	"sync"
-
-	"github.com/gordonklaus/portaudio"
 )
+
+type Detection string
 
 const (
 	DefaultSampleInterval   = 500
 	DefaultVoiceTimeframe   = 10
-	DefaultSilenceTimeframe = 2000
+	DefaultSilenceTimeframe = 50
 	DefaultInputChannels    = 1
 	DefaultSampleRate       = 22050
 	DefaultFramesPerBuffer  = 64
 
-	DefaultAMBAVG = 400000000000000.0
+	DefaultAMBAVG                  = 500000000.0
+	DefaultSpeechAMBAVGMultiplier  = 2
+	DefaultSilenceAMBAVGMultiplier = 0.5 // max: 1
+
+	NewSilenceThresholdWeight = 0.3 // max: 1
+	AudioChanSize             = 64
+
+	SpeechDetection  Detection = "speech"
+	SilenceDetection Detection = "silence"
 )
 
 type VADConfig struct {
 	// milliseconds
-	VoiceTimeframe   int
-	SilenceTimeframe int
+	VoiceTimeframe    int
+	SilenceTimeframe  int
+	SamplingTimeframe int
 
 	SampleRate      float64
 	InputChannels   int
@@ -30,192 +38,127 @@ type VADConfig struct {
 
 // the average has weight towards recent ambient noise
 type VAD struct {
-	cfg       *VADConfig
-	running   bool
-	quitCh    chan bool
-	pauseCh   chan bool
-	resumeCh  chan bool
-	active    bool // listening for silence or
-	ambAvg    float32
-	buffer    []int32
+	cfg *VADConfig
+	// stream    *stream.Stream
 	listeners []VADListener
+
+	running  bool
+	quitCh   chan bool
+	pauseCh  chan bool
+	resumeCh chan bool
+	active   bool // listening for silence or
+	ambAvg   float32
+
+	audioChan chan []int32
+
+	speechWindows  int
+	silenceWindows int
+	sampleWindows  int
 }
 
 func DefaultVADConfig() *VADConfig {
 	return &VADConfig{
-		VoiceTimeframe:   DefaultVoiceTimeframe,
-		SilenceTimeframe: DefaultSilenceTimeframe,
-		SampleRate:       DefaultSampleRate,
-		InputChannels:    DefaultInputChannels,
-		FramesPerBuffer:  DefaultFramesPerBuffer,
+		VoiceTimeframe:    DefaultVoiceTimeframe,
+		SilenceTimeframe:  DefaultSilenceTimeframe,
+		SamplingTimeframe: DefaultSampleInterval,
+		SampleRate:        DefaultSampleRate,
+		InputChannels:     DefaultInputChannels,
+		FramesPerBuffer:   DefaultFramesPerBuffer,
 	}
 }
 
 func NewVAD(cfg *VADConfig) *VAD {
 	return &VAD{
-		cfg:       cfg,
-		running:   false,
-		quitCh:    make(chan bool),
-		pauseCh:   make(chan bool),
-		resumeCh:  make(chan bool),
-		active:    false,
-		ambAvg:    DefaultAMBAVG,
-		buffer:    make([]int32, cfg.FramesPerBuffer),
+		cfg: cfg,
+		// stream:    stream,
 		listeners: make([]VADListener, 0),
+
+		running:  false,
+		quitCh:   make(chan bool),
+		pauseCh:  make(chan bool),
+		resumeCh: make(chan bool),
+		active:   false,
+		ambAvg:   DefaultAMBAVG,
+
+		audioChan: make(chan []int32, AudioChanSize),
+
+		speechWindows:  int((float32(cfg.VoiceTimeframe) / 1000.0) * float32(cfg.SampleRate)),
+		silenceWindows: int((float32(cfg.SilenceTimeframe) / 1000.0) * float32(cfg.SampleRate)),
+		sampleWindows:  int((float32(cfg.SamplingTimeframe) / 1000.0) * float32(cfg.SampleRate)),
 	}
 }
 
-func (v *VAD) RegisterListener(listener VADListener) {
-	v.listeners = append(v.listeners, listener)
+func (v *VAD) AddBuffer(b []int32) {
+	v.audioChan <- b
 }
 
-func (v *VAD) Start() {
-	go func() {
-		stream, err := v.initAudio()
-		if err != nil {
-			return
-		}
-		defer v.closeAudio(stream)
-
-		v.running = true
-		for {
-			quit := false
-			select {
-			case <-v.pauseCh:
-				<-v.resumeCh
-			case <-v.quitCh:
-				quit = true
-			default:
-				v.detect(stream)
-			}
-
-			if quit {
-				break
-			}
-		}
-	}()
-}
-
-func (v *VAD) Pause() {
-	if v.running {
-		v.running = false
-		v.pauseCh <- true
-	}
-}
-
-func (v *VAD) Resume() {
-	if !v.running {
-		v.running = true
-		v.resumeCh <- true
-	}
-}
-
-// listens to background to check what the threshold should be
-// takes in timeframe/ which is in milliseconds
-func (v *VAD) sample(stream portaudio.Stream, timeframe int) error {
-	for {
-		if v.running && !v.active {
-			silenceThreshold := float32(0)
-			framesDetected := 0
-			windowSamples := int(v.cfg.SampleRate / float64(v.cfg.FramesPerBuffer))
-			for framesDetected < windowSamples {
-				err := stream.Read()
-				if err != nil {
-					return err
-				}
-
-				for j := range v.buffer {
-					power := math.Pow(float64(v.buffer[j]), 2)
-					silenceThreshold += float32(power)
-					framesDetected++
-				}
-			}
-			silenceThreshold /= float32(windowSamples)
-			v.ambAvg = (v.ambAvg + silenceThreshold) / 2
+func (v *VAD) DetectSpeech() bool {
+	buffers := [][]int32{}
+	for len(buffers) < v.speechWindows {
+		select {
+		case newBuf := <-v.audioChan:
+			// log.Printf("%d %d", len(buffers), v.speechWindows)
+			buffers = append(buffers, newBuf)
+		default:
+			continue
 		}
 	}
+
+	isSpeech := v.detect(SpeechDetection, buffers)
+	if !isSpeech {
+		v.sample(buffers)
+	}
+
+	return isSpeech
+}
+
+func (v *VAD) DetectSilence() bool {
+	buffers := [][]int32{}
+	for len(buffers) < v.silenceWindows {
+		select {
+		case newBuf := <-v.audioChan:
+			buffers = append(buffers, newBuf)
+		default:
+			continue
+		}
+	}
+
+	return v.detect(SilenceDetection, buffers)
 }
 
 // the listening for voice window should be smaller than listening for silence window
 // because we want to record right after we hear voice, and a little bit of silence will trigger the recorder to stop
-func (v *VAD) detect(stream *portaudio.Stream) error {
-	var windowSamples int
-	if v.active {
-		windowSamples = int((float32(v.cfg.SilenceTimeframe) / 1000.0) * float32(v.cfg.SampleRate))
-	} else {
-		windowSamples = int((float32(v.cfg.VoiceTimeframe) / 1000.0) * float32(v.cfg.SampleRate))
-	}
+// this function should have the only stream reads
+func (v *VAD) detect(detection Detection, buffers [][]int32) bool {
+
 	avgEnergy := float32(0)
 	framesDetected := 0
-	for framesDetected < windowSamples {
-		if !v.running {
-			return nil
-		}
-
-		err := stream.Read()
-		if err != nil {
-			return err
-		}
-
-		for j := range v.buffer {
-			avgEnergy += float32(math.Pow(float64(v.buffer[j]), 2))
+	for _, buffer := range buffers {
+		for _, amp := range buffer {
+			avgEnergy += float32(math.Pow(float64(amp), 2))
 			framesDetected++
 		}
 	}
-	avgEnergy /= float32(windowSamples)
+	avgEnergy = float32(math.Sqrt(float64(avgEnergy / float32(len(buffers)))))
 
-	if avgEnergy > float32(v.ambAvg) && !v.active {
-		v.notifyListeners(true)
-		v.active = true
-	} else if avgEnergy <= float32(v.ambAvg) && v.active {
-		v.notifyListeners(false)
-		v.active = false
+	if avgEnergy > float32(v.ambAvg)*DefaultSpeechAMBAVGMultiplier &&
+		detection == SpeechDetection {
+		return true
+	} else if avgEnergy <= float32(v.ambAvg)*DefaultSilenceAMBAVGMultiplier &&
+		detection == SilenceDetection {
+		return true
 	}
 
-	return nil
+	return false
 }
 
-func (v *VAD) notifyListeners(speech bool) {
-	var wg sync.WaitGroup
-	for i := range v.listeners {
-		wg.Add(1)
-		go func(index int, speech bool) {
-			if speech {
-				v.listeners[index].OnSpeechDetected()
-			} else {
-				v.listeners[index].OnSilenceDetected()
-			}
-		}(i, speech)
+func (v *VAD) sample(buffers [][]int32) {
+	silenceThreshold := float32(0)
+	for _, buffer := range buffers {
+		for j := range buffer {
+			silenceThreshold += float32(math.Pow(float64(buffer[j]), 2))
+		}
 	}
-	wg.Wait()
-}
-
-func (v *VAD) initAudio() (*portaudio.Stream, error) {
-	err := portaudio.Initialize()
-	if err != nil {
-		return nil, err
-	}
-
-	stream, err := portaudio.OpenDefaultStream(
-		v.cfg.InputChannels,
-		0,
-		v.cfg.SampleRate,
-		v.cfg.FramesPerBuffer,
-		v.buffer,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	err = stream.Start()
-	if err != nil {
-		return nil, err
-	}
-
-	return stream, nil
-}
-
-func (v *VAD) closeAudio(stream *portaudio.Stream) {
-	portaudio.Terminate()
-	stream.Close()
+	silenceThreshold = float32(math.Sqrt(float64(silenceThreshold / float32(len(buffers)))))
+	v.ambAvg = v.ambAvg*(1-NewSilenceThresholdWeight) + silenceThreshold*NewSilenceThresholdWeight
 }

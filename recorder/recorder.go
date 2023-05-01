@@ -3,10 +3,12 @@ package recorder
 import (
 	"bytes"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/garlicgarrison/go-recorder/codec"
-	"github.com/gordonklaus/portaudio"
+	"github.com/garlicgarrison/go-recorder/stream"
+	"github.com/garlicgarrison/go-recorder/vad"
 )
 
 type Format string
@@ -29,10 +31,11 @@ type RecorderConfig struct {
 
 type Recorder struct {
 	cfg    *RecorderConfig
-	buffer []int32
+	stream *stream.Stream
+	vad    *vad.VAD
 }
 
-func NewDefaultRecorderConfig() *RecorderConfig {
+func DefaultRecorderConfig() *RecorderConfig {
 	return &RecorderConfig{
 		SampleRate:      22050,
 		InputChannels:   1,
@@ -41,14 +44,16 @@ func NewDefaultRecorderConfig() *RecorderConfig {
 	}
 }
 
-func NewRecorder(cfg *RecorderConfig) (*Recorder, error) {
+func NewRecorder(cfg *RecorderConfig, stream *stream.Stream) (*Recorder, error) {
 	if cfg == nil {
 		return nil, ErrInvalidRecorderConfig
 	}
 
+	vad := vad.NewVAD(vad.DefaultVADConfig())
 	return &Recorder{
 		cfg:    cfg,
-		buffer: make([]int32, cfg.FramesPerBuffer),
+		stream: stream,
+		vad:    vad,
 	}, nil
 }
 
@@ -59,47 +64,18 @@ func (r *Recorder) Record(format Format, quit chan bool) (*bytes.Buffer, error) 
 		timerChan <- true
 	}()
 
-	err := portaudio.Initialize()
-	if err != nil {
-		return nil, err
-	}
-
-	defer portaudio.Terminate()
-
-	stream, err := portaudio.OpenDefaultStream(
-		r.cfg.InputChannels,
-		0,
-		r.cfg.SampleRate,
-		r.cfg.FramesPerBuffer,
-		r.buffer,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	err = stream.Start()
-	if err != nil {
-		return nil, err
-	}
-
-	defer stream.Close()
-
 	fullStream := []int32{}
 	for {
-		err = stream.Read()
+		buffer, err := r.stream.Read()
 		if err != nil {
 			return nil, err
 		}
 
 		currStream := make([]int32, r.cfg.FramesPerBuffer)
-		copy(currStream, r.buffer)
+		copy(currStream, buffer)
 		fullStream = append(fullStream, currStream...)
 		select {
 		case <-quit:
-			if err = stream.Stop(); err != nil {
-				return nil, err
-			}
-
 			switch format {
 			case AIFF:
 				return codec.NewDefaultAIFF(fullStream).EncodeAIFF()
@@ -107,10 +83,6 @@ func (r *Recorder) Record(format Format, quit chan bool) (*bytes.Buffer, error) 
 				return codec.NewDefaultWAV(fullStream).EncodeWAV()
 			}
 		case <-timerChan:
-			if err = stream.Stop(); err != nil {
-				return nil, err
-			}
-
 			switch format {
 			case AIFF:
 				return codec.NewDefaultAIFF(fullStream).EncodeAIFF()
@@ -119,5 +91,80 @@ func (r *Recorder) Record(format Format, quit chan bool) (*bytes.Buffer, error) 
 			}
 		default:
 		}
+	}
+}
+
+func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
+	log.Printf("Listening...")
+	speechCh := make(chan bool)
+	go func() {
+		for {
+			if r.vad.DetectSpeech() {
+				break
+			}
+		}
+		speechCh <- true
+	}()
+
+	for {
+		buffer, err := r.stream.Read()
+		if err != nil {
+			return nil, err
+		}
+		r.vad.AddBuffer(buffer)
+
+		quit := false
+		select {
+		case <-speechCh:
+			quit = true
+		default:
+			continue
+		}
+
+		if quit {
+			break
+		}
+	}
+
+	fullStream := []int32{}
+	go func() {
+		for {
+			if r.vad.DetectSilence() {
+				break
+			}
+		}
+
+		speechCh <- true
+	}()
+
+	for {
+		buffer, err := r.stream.Read()
+		if err != nil {
+			return nil, err
+		}
+		r.vad.AddBuffer(buffer)
+		fullStream = append(fullStream, buffer...)
+
+		quit := false
+		select {
+		case <-speechCh:
+			quit = true
+		default:
+			continue
+		}
+
+		if quit {
+			break
+		}
+	}
+
+	log.Printf("Stopped...")
+	switch format {
+	case AIFF:
+		return codec.NewDefaultAIFF(fullStream).EncodeAIFF()
+	case WAV:
+		return codec.NewDefaultWAV(fullStream).EncodeWAV()
+	default:
+		return codec.NewDefaultWAV(fullStream).EncodeWAV()
 	}
 }
