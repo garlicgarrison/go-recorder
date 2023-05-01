@@ -8,7 +8,7 @@ type Detection string
 
 const (
 	DefaultSampleInterval   = 500
-	DefaultVoiceTimeframe   = 10
+	DefaultVoiceTimeframe   = 5
 	DefaultSilenceTimeframe = 50
 	DefaultInputChannels    = 1
 	DefaultSampleRate       = 22050
