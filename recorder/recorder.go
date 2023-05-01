@@ -27,6 +27,8 @@ type RecorderConfig struct {
 	InputChannels   int
 	FramesPerBuffer int
 	MaxTime         int //milliseconds
+
+	VADConfig *vad.VADConfig
 }
 
 type Recorder struct {
@@ -49,7 +51,7 @@ func NewRecorder(cfg *RecorderConfig, stream *stream.Stream) (*Recorder, error) 
 		return nil, ErrInvalidRecorderConfig
 	}
 
-	vad := vad.NewVAD(vad.DefaultVADConfig())
+	vad := vad.NewVAD(cfg.VADConfig)
 	return &Recorder{
 		cfg:    cfg,
 		stream: stream,

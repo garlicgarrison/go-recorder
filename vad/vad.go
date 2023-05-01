@@ -1,6 +1,7 @@
 package vad
 
 import (
+	"log"
 	"math"
 )
 
@@ -69,7 +70,11 @@ func NewVAD(cfg *VADConfig) *VAD {
 }
 
 func (v *VAD) AddBuffer(b []int32) {
-	v.audioChan <- b
+	select {
+	case v.audioChan <- b:
+	default:
+		log.Printf("channel is full -- discarding value")
+	}
 }
 
 func (v *VAD) DetectSpeech() bool {
