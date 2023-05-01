@@ -38,19 +38,9 @@ type VADConfig struct {
 
 // the average has weight towards recent ambient noise
 type VAD struct {
-	cfg *VADConfig
-	// stream    *stream.Stream
-	listeners []VADListener
-
-	running  bool
-	quitCh   chan bool
-	pauseCh  chan bool
-	resumeCh chan bool
-	active   bool // listening for silence or
-	ambAvg   float32
-
-	audioChan chan []int32
-
+	cfg            *VADConfig
+	ambAvg         float32
+	audioChan      chan []int32
 	speechWindows  int
 	silenceWindows int
 	sampleWindows  int
@@ -69,19 +59,9 @@ func DefaultVADConfig() *VADConfig {
 
 func NewVAD(cfg *VADConfig) *VAD {
 	return &VAD{
-		cfg: cfg,
-		// stream:    stream,
-		listeners: make([]VADListener, 0),
-
-		running:  false,
-		quitCh:   make(chan bool),
-		pauseCh:  make(chan bool),
-		resumeCh: make(chan bool),
-		active:   false,
-		ambAvg:   DefaultAMBAVG,
-
-		audioChan: make(chan []int32, AudioChanSize),
-
+		cfg:            cfg,
+		ambAvg:         DefaultAMBAVG,
+		audioChan:      make(chan []int32, AudioChanSize),
 		speechWindows:  int((float32(cfg.VoiceTimeframe) / 1000.0) * float32(cfg.SampleRate)),
 		silenceWindows: int((float32(cfg.SilenceTimeframe) / 1000.0) * float32(cfg.SampleRate)),
 		sampleWindows:  int((float32(cfg.SamplingTimeframe) / 1000.0) * float32(cfg.SampleRate)),
@@ -97,7 +77,6 @@ func (v *VAD) DetectSpeech() bool {
 	for len(buffers) < v.speechWindows {
 		select {
 		case newBuf := <-v.audioChan:
-			// log.Printf("%d %d", len(buffers), v.speechWindows)
 			buffers = append(buffers, newBuf)
 		default:
 			continue
