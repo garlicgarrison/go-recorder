@@ -22,7 +22,6 @@ func WavSeg(wav *bytes.Buffer) []*bytes.Buffer {
 	}
 
 	threshold := DefaultThreshold * rms(w.Data)
-	minSilenceLength := int((float32(DefaultMinSilentTime) / 1000.0) * float32(w.Header.SampleRate))
 	var chunks [][]int32
 	var chunkStart int
 	var chunkEnd int
@@ -40,7 +39,7 @@ func WavSeg(wav *bytes.Buffer) []*bytes.Buffer {
 			}
 		} else {
 			silenceLength++
-			if inChunk && silenceLength > minSilenceLength {
+			if inChunk && silenceLength > minSilenceLength(w.Header.SampleRate) {
 				chunkEnd = i
 				inChunk = false
 				chunks = append(chunks, w.Data[chunkStart:chunkEnd])
@@ -54,7 +53,7 @@ func WavSeg(wav *bytes.Buffer) []*bytes.Buffer {
 
 	toRet := []*bytes.Buffer{}
 	for _, chunk := range chunks {
-		if len(chunk) < int((float32(DefaultCutoffSpeechInterval)/1000.0)*float32(w.Header.SampleRate)) {
+		if len(chunk) < chunkLength(w.Header.SampleRate) {
 			continue
 		}
 
@@ -77,4 +76,12 @@ func rms(chunk []int32) float64 {
 		sum += math.Pow(float64(c), 2)
 	}
 	return math.Sqrt(sum / float64(len(chunk)))
+}
+
+func minSilenceLength(sampleRate uint32) int {
+	return int((float32(DefaultMinSilentTime) / 1000.0) * float32(sampleRate))
+}
+
+func chunkLength(sampleRate uint32) int {
+	return int((float32(DefaultCutoffSpeechInterval) / 1000.0) * float32(sampleRate))
 }
