@@ -10,14 +10,14 @@ type Detection string
 const (
 	DefaultSampleInterval   = 500
 	DefaultVoiceTimeframe   = 5
-	DefaultSilenceTimeframe = 50
+	DefaultSilenceTimeframe = 12
 	DefaultInputChannels    = 1
 	DefaultSampleRate       = 22050
 	DefaultFramesPerBuffer  = 64
 
 	DefaultAMBAVG                  = 500000000.0
 	DefaultSpeechAMBAVGMultiplier  = 2
-	DefaultSilenceAMBAVGMultiplier = 0.5 // max: 1
+	DefaultSilenceAMBAVGMultiplier = 1 // max: 1
 
 	NewSilenceThresholdWeight = 0.3 // max: 1
 	AudioChanSize             = 64
@@ -77,12 +77,14 @@ func (v *VAD) AddBuffer(b []int32) {
 	}
 }
 
-func (v *VAD) DetectSpeech() bool {
+func (v *VAD) DetectSpeech(stop chan bool) bool {
 	buffers := [][]int32{}
 	for len(buffers) < v.speechWindows {
 		select {
 		case newBuf := <-v.audioChan:
 			buffers = append(buffers, newBuf)
+		case <-stop:
+			return false
 		default:
 			continue
 		}
@@ -96,12 +98,14 @@ func (v *VAD) DetectSpeech() bool {
 	return isSpeech
 }
 
-func (v *VAD) DetectSilence() bool {
+func (v *VAD) DetectSilence(stop chan bool) bool {
 	buffers := [][]int32{}
 	for len(buffers) < v.silenceWindows {
 		select {
 		case newBuf := <-v.audioChan:
 			buffers = append(buffers, newBuf)
+		case <-stop:
+			return false
 		default:
 			continue
 		}
@@ -114,13 +118,10 @@ func (v *VAD) DetectSilence() bool {
 // because we want to record right after we hear voice, and a little bit of silence will trigger the recorder to stop
 // this function should have the only stream reads
 func (v *VAD) detect(detection Detection, buffers [][]int32) bool {
-
 	avgEnergy := float32(0)
-	framesDetected := 0
 	for _, buffer := range buffers {
 		for _, amp := range buffer {
 			avgEnergy += float32(math.Pow(float64(amp), 2))
-			framesDetected++
 		}
 	}
 	avgEnergy = float32(math.Sqrt(float64(avgEnergy / float32(len(buffers)))))

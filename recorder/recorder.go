@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"log"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/garlicgarrison/go-recorder/codec"
@@ -35,6 +37,8 @@ type Recorder struct {
 	cfg    *RecorderConfig
 	stream *stream.Stream
 	vad    *vad.VAD
+
+	quit chan bool
 }
 
 func DefaultRecorderConfig() *RecorderConfig {
@@ -43,6 +47,8 @@ func DefaultRecorderConfig() *RecorderConfig {
 		InputChannels:   1,
 		FramesPerBuffer: 64,
 		MaxTime:         100000,
+
+		VADConfig: vad.DefaultVADConfig(),
 	}
 }
 
@@ -56,6 +62,8 @@ func NewRecorder(cfg *RecorderConfig, stream *stream.Stream) (*Recorder, error) 
 		cfg:    cfg,
 		stream: stream,
 		vad:    vad,
+
+		quit: make(chan bool),
 	}, nil
 }
 
@@ -99,12 +107,30 @@ func (r *Recorder) Record(format Format, quit chan bool) (*bytes.Buffer, error) 
 func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
 	log.Printf("Listening...")
 	speechCh := make(chan bool)
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, os.Interrupt)
+
 	go func() {
+		detectStop := make(chan bool)
 		for {
-			if r.vad.DetectSpeech() {
+			if r.vad.DetectSpeech(detectStop) {
+				break
+			}
+
+			quit := false
+			select {
+			case <-signalCh:
+				r.quit <- true
+				detectStop <- true
+				quit = true
+			default:
+			}
+
+			if quit {
 				break
 			}
 		}
+
 		speechCh <- true
 	}()
 
@@ -119,6 +145,8 @@ func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
 		select {
 		case <-speechCh:
 			quit = true
+		case <-r.quit:
+			return nil, errors.New("interrupted by signal")
 		default:
 			continue
 		}
@@ -128,10 +156,23 @@ func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
 		}
 	}
 
-	fullStream := []int32{}
+	log.Printf("Waiting...")
 	go func() {
+		detectStop := make(chan bool)
 		for {
-			if r.vad.DetectSilence() {
+			if r.vad.DetectSilence(detectStop) {
+				break
+			}
+
+			quit := false
+			select {
+			case <-signalCh:
+				r.quit <- true
+				detectStop <- true
+				quit = true
+			default:
+			}
+			if quit {
 				break
 			}
 		}
@@ -139,6 +180,7 @@ func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
 		speechCh <- true
 	}()
 
+	fullStream := []int32{}
 	for {
 		buffer, err := r.stream.Read()
 		if err != nil {
@@ -150,6 +192,8 @@ func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
 		quit := false
 		select {
 		case <-speechCh:
+			quit = true
+		case <-r.quit:
 			quit = true
 		default:
 			continue
