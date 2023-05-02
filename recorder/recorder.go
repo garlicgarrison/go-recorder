@@ -146,7 +146,7 @@ func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
 		case <-speechCh:
 			quit = true
 		case <-r.quit:
-			return nil, errors.New("interrupted by signal")
+			quit = true
 		default:
 			continue
 		}
