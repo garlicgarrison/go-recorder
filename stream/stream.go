@@ -1,6 +1,8 @@
 package stream
 
 import (
+	"errors"
+	"log"
 	"sync"
 
 	"github.com/gordonklaus/portaudio"
@@ -10,6 +12,19 @@ const (
 	DefaultInputChannels   = 1
 	DefaultSampleRate      = 22050
 	DefaultFramesPerBuffer = 64
+)
+
+type StreamState string
+
+const (
+	Closed  = "closed"
+	Started = "started"
+	Opened  = "opened"
+)
+
+var (
+	ErrAlreadyStarted = errors.New("stream already started")
+	ErrAlreadyOpened  = errors.New("stream already opened")
 )
 
 type StreamConfig struct {
@@ -23,7 +38,7 @@ type Stream struct {
 	cfg    *StreamConfig
 	stream *portaudio.Stream
 	mutex  *sync.Mutex
-	quit   chan bool
+	state  StreamState
 	buffer []int32
 }
 
@@ -41,22 +56,14 @@ func NewStream(cfg *StreamConfig) (*Stream, error) {
 		return nil, err
 	}
 
-	pbuffer := make([]int32, cfg.FramesPerBuffer)
-	rbuffer := make([]int32, cfg.FramesPerBuffer)
-
+	buffer := make([]int32, cfg.FramesPerBuffer)
 	stream, err := portaudio.OpenDefaultStream(
 		cfg.InputChannels,
 		0,
 		cfg.SampleRate,
 		cfg.FramesPerBuffer,
-		pbuffer,
-		rbuffer,
+		buffer,
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	err = stream.Start()
 	if err != nil {
 		return nil, err
 	}
@@ -65,14 +72,50 @@ func NewStream(cfg *StreamConfig) (*Stream, error) {
 		cfg:    cfg,
 		stream: stream,
 		mutex:  &sync.Mutex{},
-		buffer: pbuffer,
+		state:  Opened,
+		buffer: buffer,
 	}, nil
 }
 
+func (s *Stream) Start() error {
+	switch s.state {
+	case Opened:
+		return s.stream.Start()
+	case Closed:
+		buffer := make([]int32, s.cfg.FramesPerBuffer)
+		stream, err := portaudio.OpenDefaultStream(
+			s.cfg.InputChannels,
+			0,
+			s.cfg.SampleRate,
+			s.cfg.FramesPerBuffer,
+			buffer,
+		)
+		if err != nil {
+			log.Printf("stream error -- %s", err)
+			return err
+		}
+
+		s.buffer = buffer
+		s.stream = stream
+		s.state = Started
+		stream.Start()
+
+		return nil
+	case Started:
+		return ErrAlreadyStarted
+	}
+
+	return nil
+}
+
 func (s *Stream) Close() error {
-	s.quit <- true
-	portaudio.Terminate()
-	return s.stream.Close()
+	err := s.stream.Close()
+	if err != nil {
+		return err
+	}
+
+	s.state = Closed
+	return nil
 }
 
 func (s *Stream) Read() ([]int32, error) {
@@ -87,4 +130,9 @@ func (s *Stream) Read() ([]int32, error) {
 	toRet := make([]int32, s.cfg.FramesPerBuffer)
 	copy(toRet, s.buffer)
 	return toRet, nil
+}
+
+// Terminates portaudio
+func (s *Stream) Terminate() {
+	portaudio.Terminate()
 }

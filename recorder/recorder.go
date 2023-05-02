@@ -110,6 +110,12 @@ func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
 
+	err := r.stream.Start()
+	if err != nil {
+		return nil, err
+	}
+	defer r.stream.Close()
+
 	go func() {
 		detectStop := make(chan bool)
 		for {
@@ -137,6 +143,7 @@ func (r *Recorder) RecordVAD(format Format) (*bytes.Buffer, error) {
 	for {
 		buffer, err := r.stream.Read()
 		if err != nil {
+			log.Printf("stream error -- %s", err)
 			return nil, err
 		}
 		r.vad.AddBuffer(buffer)

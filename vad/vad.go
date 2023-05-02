@@ -16,7 +16,7 @@ const (
 	DefaultFramesPerBuffer  = 64
 
 	DefaultAMBAVG                  = 500000000.0
-	DefaultSpeechAMBAVGMultiplier  = 2
+	DefaultSpeechAMBAVGMultiplier  = 4
 	DefaultSilenceAMBAVGMultiplier = 1 // max: 1
 
 	NewSilenceThresholdWeight = 0.3 // max: 1
