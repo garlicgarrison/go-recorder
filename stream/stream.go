@@ -91,7 +91,7 @@ func (s *Stream) Start() error {
 			buffer,
 		)
 		if err != nil {
-			log.Printf("stream error -- %s", err)
+			log.Printf("open default stream error -- %s", err)
 			return err
 		}
 
