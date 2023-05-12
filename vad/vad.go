@@ -28,6 +28,9 @@ const (
 
 type VADConfig struct {
 	// milliseconds
+	SpeechAMBAVGMultiplier  int
+	SilenceAMBAVGMultiplier float64
+
 	VoiceTimeframe    int
 	SilenceTimeframe  int
 	SamplingTimeframe int
@@ -49,12 +52,14 @@ type VAD struct {
 
 func DefaultVADConfig() *VADConfig {
 	return &VADConfig{
-		VoiceTimeframe:    DefaultVoiceTimeframe,
-		SilenceTimeframe:  DefaultSilenceTimeframe,
-		SamplingTimeframe: DefaultSampleInterval,
-		SampleRate:        DefaultSampleRate,
-		InputChannels:     DefaultInputChannels,
-		FramesPerBuffer:   DefaultFramesPerBuffer,
+		SpeechAMBAVGMultiplier:  DefaultSpeechAMBAVGMultiplier,
+		SilenceAMBAVGMultiplier: DefaultSilenceAMBAVGMultiplier,
+		VoiceTimeframe:          DefaultVoiceTimeframe,
+		SilenceTimeframe:        DefaultSilenceTimeframe,
+		SamplingTimeframe:       DefaultSampleInterval,
+		SampleRate:              DefaultSampleRate,
+		InputChannels:           DefaultInputChannels,
+		FramesPerBuffer:         DefaultFramesPerBuffer,
 	}
 }
 
